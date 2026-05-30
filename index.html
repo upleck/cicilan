@@ -346,6 +346,11 @@
       background: var(--blue);
     }
 
+    .btn[disabled] {
+      cursor: not-allowed;
+      opacity: 0.62;
+    }
+
     .tabs {
       display: flex;
       gap: 8px;
@@ -477,6 +482,43 @@
       background: #eff6ff;
       color: #1e3a8a;
       padding: 12px;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(15, 23, 42, 0.58);
+    }
+
+    .modal-dialog {
+      width: min(640px, 100%);
+      max-height: min(760px, calc(100vh - 36px));
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+    }
+
+    .modal-head {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .modal-body {
+      padding: 18px;
     }
 
     .error {
@@ -715,6 +757,7 @@
       page: null,
       selectedMethodId: '',
       currentPayment: null,
+      paymentDialogOpen: false,
       loading: false,
       error: '',
       adminSession: localStorage.getItem('adminSession') || '',
@@ -970,12 +1013,9 @@
             </div>
           </section>
 
-          <div class="grid grid-2">
-            ${renderPaymentForm()}
-            ${renderPaymentInstructions()}
-          </div>
-
+          ${renderPaymentForm()}
           ${renderPaymentHistory(state.page.payments)}
+          ${renderPaymentDialog()}
         </div>
       `;
     }
@@ -1021,51 +1061,77 @@
               </div>
               <button class="btn blue" type="submit" ${methods.length ? '' : 'disabled'}>Lanjut Bayar</button>
             </form>
+            ${state.currentPayment ? `
+              <div class="notice stack" style="margin-top:12px;">
+                <div>
+                  <strong>Instruksi pembayaran terakhir tersedia.</strong><br>
+                  Kode: ${escapeHtml(state.currentPayment.kode_pembayaran)}
+                </div>
+                <button class="btn secondary" type="button" onclick="openPaymentDialog()">Lihat Instruksi</button>
+              </div>
+            ` : ''}
           </div>
         </section>
       `;
     }
 
-    function renderPaymentInstructions() {
+    function renderPaymentDialog() {
       const payment = state.currentPayment;
-      if (!payment) {
-        return `
-          <section class="panel">
-            <div class="panel-head"><h2>Instruksi</h2></div>
-            <div class="panel-body empty">Input nominal dan pilih metode untuk melihat instruksi bayar.</div>
-          </section>
-        `;
-      }
+      if (!payment || !state.paymentDialogOpen) return '';
       const method = payment.method || {};
+      const paidClicked = !!payment.tanggal_bayar_diklik;
       return `
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Instruksi Bayar</h2>
-            ${statusBadge(payment.status)}
-          </div>
-          <div class="panel-body stack">
-            <div class="notice">
-              <strong>Kode pembayaran: ${escapeHtml(payment.kode_pembayaran)}</strong><br>
-              Nominal diajukan: ${money(payment.nominal_diajukan)}
-            </div>
-            <div class="item stack">
-              <div class="row between">
-                <h3>${escapeHtml(method.nama || '-')}</h3>
-                <span class="badge">${escapeHtml(method.jenis || '-')}</span>
+        <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="payment-dialog-title">
+          <section class="modal-dialog">
+            <div class="modal-head">
+              <div>
+                <h2 id="payment-dialog-title">Instruksi Bayar</h2>
+                <p class="muted">${escapeHtml(payment.kode_pembayaran)}</p>
               </div>
-              ${method.atas_nama ? `<div>Atas nama: <strong>${escapeHtml(method.atas_nama)}</strong></div>` : ''}
-              ${method.nomor_tujuan ? `
-                <div>Nomor tujuan: <span class="copy">${escapeHtml(method.nomor_tujuan)}</span></div>
-                <button class="btn secondary" type="button" onclick="copyText('${escapeHtml(method.nomor_tujuan)}')">Salin Nomor</button>
-              ` : ''}
-              ${method.payment_link ? `<a class="btn blue" style="display:inline-block;text-align:center;text-decoration:none;" href="${escapeHtml(method.payment_link)}" target="_blank" rel="noopener">Buka Link Pembayaran</a>` : ''}
-              ${method.qr_image_url ? `<img class="qr-img" src="${escapeHtml(method.qr_image_url)}" alt="QRIS">` : method.jenis === 'QRIS' ? '<div class="empty">URL gambar QRIS belum diisi admin.</div>' : ''}
-              ${method.instruksi ? `<p class="muted">${escapeHtml(method.instruksi)}</p>` : ''}
+              <div class="row">
+                ${statusBadge(payment.status)}
+                <button class="btn secondary" type="button" onclick="closePaymentDialog()">Tutup</button>
+              </div>
             </div>
-            <button class="btn green" type="button" onclick="markPaid('${escapeHtml(payment.payment_id)}')">Saya Sudah Bayar</button>
-          </div>
-        </section>
+            <div class="modal-body stack">
+              <div class="notice">
+                <strong>Nominal diajukan: ${money(payment.nominal_diajukan)}</strong>
+              </div>
+              <div class="item stack">
+                <div class="row between">
+                  <h3>${escapeHtml(method.nama || '-')}</h3>
+                  <span class="badge">${escapeHtml(method.jenis || '-')}</span>
+                </div>
+                ${method.atas_nama ? `<div>Atas nama: <strong>${escapeHtml(method.atas_nama)}</strong></div>` : ''}
+                ${method.nomor_tujuan ? `
+                  <div>Nomor tujuan: <span class="copy">${escapeHtml(method.nomor_tujuan)}</span></div>
+                  <button class="btn secondary" type="button" onclick="copyText('${escapeHtml(method.nomor_tujuan)}')">Salin Nomor</button>
+                ` : ''}
+                ${method.payment_link ? `<a class="btn blue" style="display:inline-block;text-align:center;text-decoration:none;" href="${escapeHtml(method.payment_link)}" target="_blank" rel="noopener">Buka Link Pembayaran</a>` : ''}
+                ${method.qr_image_url ? `<img class="qr-img" src="${escapeHtml(method.qr_image_url)}" alt="QRIS">` : method.jenis === 'QRIS' ? '<div class="empty">URL gambar QRIS belum diisi admin.</div>' : ''}
+                ${method.instruksi ? `<p class="muted">${escapeHtml(method.instruksi)}</p>` : ''}
+              </div>
+              ${paidClicked ? `
+                <div class="success">Pembayaran sudah ditandai dibayar. Admin akan mengecek dan mengonfirmasi.</div>
+                <button class="btn green" type="button" disabled>Menunggu Konfirmasi Admin</button>
+              ` : `
+                <button class="btn green" type="button" onclick="markPaid('${escapeHtml(payment.payment_id)}')">Saya Sudah Bayar</button>
+              `}
+            </div>
+          </section>
+        </div>
       `;
+    }
+
+    function openPaymentDialog() {
+      if (!state.currentPayment) return;
+      state.paymentDialogOpen = true;
+      render();
+    }
+
+    function closePaymentDialog() {
+      state.paymentDialogOpen = false;
+      render();
     }
 
     function renderPaymentHistory(payments) {
@@ -1440,6 +1506,7 @@
       run(async () => {
         const result = await server('createPaymentIntent', state.token, amount, methodId, note);
         state.currentPayment = result.payment;
+        state.paymentDialogOpen = true;
         state.page = result.page;
       });
     }
@@ -1448,6 +1515,7 @@
       run(async () => {
         state.page = await server('markPaymentAsPaid', state.token, paymentId);
         state.currentPayment = state.page.payments.find(payment => payment.payment_id === paymentId) || state.currentPayment;
+        state.paymentDialogOpen = true;
       });
     }
 
