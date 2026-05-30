@@ -773,25 +773,13 @@
       return `<span class="badge ${cls}">${escapeHtml(upper || '-')}</span>`;
     }
 
-    function toDateTimeLocal(value, fallbackTime) {
+    function toDateTimeLocal(value) {
       const raw = String(value || '').trim();
       const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
       if (match) {
         return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}`;
       }
-      const date = new Date();
-      date.setDate(date.getDate() + 1);
-      const time = String(fallbackTime || '08:00').match(/^(\d{2}):(\d{2})/) || ['','08','00'];
-      date.setHours(Number(time[1]), Number(time[2]), 0, 0);
-      const pad = value => String(value).padStart(2, '0');
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-    }
-
-    function dayOptions(selectedDay) {
-      const selected = Math.max(1, Math.min(28, Number(selectedDay || 1)));
-      return Array.from({ length: 28 }, (_, index) => index + 1)
-        .map(day => `<option value="${day}" ${day === selected ? 'selected' : ''}>${day}</option>`)
-        .join('');
+      return '';
     }
 
     function setLoading(isLoading) {
@@ -1317,23 +1305,22 @@
                     </select>
                   </div>
                   <div class="field">
-                    <label>Reminder</label>
+                    <label>Pengulangan</label>
                     <select name="reminder_type">
-                      ${['BULANAN','MINGGUAN','HARIAN','JAM','MENIT'].map(type => `<option value="${type}" ${(borrower.reminder_type || 'BULANAN') === type ? 'selected' : ''}>${type}</option>`).join('')}
+                      ${[
+                        ['MENIT', 'Menit'],
+                        ['JAM', 'Jam'],
+                        ['HARIAN', 'Hari'],
+                        ['MINGGUAN', 'Minggu'],
+                        ['BULANAN', 'Bulan']
+                      ].map(([value, label]) => `<option value="${value}" ${(borrower.reminder_type || 'BULANAN') === value ? 'selected' : ''}>${label}</option>`).join('')}
                     </select>
                   </div>
-                  <div class="field"><label>Interval</label><input type="number" name="reminder_interval" min="1" step="1" value="${escapeHtml(borrower.reminder_interval || 1)}"></div>
-                </div>
-                <div class="form-grid">
-                  <div class="field"><label>Jam pengingat</label><input type="time" name="reminder_time" value="${escapeHtml(borrower.reminder_time || '08:00')}"></div>
-                  <div class="field">
-                    <label>Tanggal bulanan</label>
-                    <select name="day_of_month">${dayOptions(borrower.day_of_month)}</select>
-                  </div>
+                  <div class="field"><label>Ulang setiap</label><input type="number" name="reminder_interval" min="1" step="1" value="${escapeHtml(borrower.reminder_interval || 1)}"></div>
                 </div>
                 <div class="field">
-                  <label>Pengingat berikutnya</label>
-                  <input type="datetime-local" name="next_reminder_at" value="${escapeHtml(toDateTimeLocal(borrower.next_reminder_at, borrower.reminder_time || '08:00'))}">
+                  <label>Pengingat berikutnya (WITA)</label>
+                  <input type="datetime-local" name="next_reminder_at" value="${escapeHtml(toDateTimeLocal(borrower.next_reminder_at))}" required>
                 </div>
                 <div class="form-actions">
                   ${isEditing ? '<button class="btn secondary" type="button" onclick="clearBorrowerForm()">Batal</button>' : ''}
@@ -1733,7 +1720,6 @@
         sisa_hutang: Number(String(data.sisa_hutang || data.total_hutang).replace(/\D/g, '')),
         cicilan_disarankan: Number(String(data.cicilan_disarankan || 0).replace(/\D/g, '')),
         reminder_interval: Number(data.reminder_interval || 1),
-        day_of_month: Number(data.day_of_month || 1),
         next_reminder_at: String(data.next_reminder_at || '').replace('T', ' '),
         status: data.status || 'AKTIF'
       };
