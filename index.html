@@ -473,7 +473,7 @@
     }
 
     .table-wrap table {
-      min-width: 640px;
+      min-width: 760px;
     }
 
     .notice {
@@ -758,10 +758,12 @@
       selectedMethodId: '',
       currentPayment: null,
       paymentDialogOpen: false,
+      borrowerHistoryFilter: 'all',
       loading: false,
       error: '',
       adminSession: localStorage.getItem('adminSession') || '',
       adminTab: 'payments',
+      adminHistoryFilter: 'all',
       dashboard: null,
       editingBorrower: null,
       editingMethod: null
@@ -810,10 +812,64 @@
       const upper = String(status || '').toUpperCase();
       const cls = upper === 'DITERIMA' || upper === 'LUNAS' || upper === 'AKTIF'
         ? 'green'
-        : upper === 'DITOLAK'
+        : upper === 'DITOLAK' || upper === 'DIBATALKAN'
           ? 'red'
           : 'amber';
       return `<span class="badge ${cls}">${escapeHtml(upper || '-')}</span>`;
+    }
+
+    function paymentStatus(payment) {
+      return String(payment && payment.status || '').toUpperCase();
+    }
+
+    function paymentCanExpire(payment) {
+      return paymentStatus(payment) === 'MENUNGGU' && !(payment && payment.tanggal_bayar_diklik);
+    }
+
+    function paymentIsPaidHistory(payment) {
+      const status = paymentStatus(payment);
+      return status === 'DITERIMA' || (status === 'MENUNGGU' && !!payment.tanggal_bayar_diklik);
+    }
+
+    function paymentSecondsLeft(payment) {
+      const expiry = Date.parse(payment && payment.batas_bayar_iso || '');
+      if (!Number.isNaN(expiry)) {
+        return Math.max(0, Math.floor((expiry - Date.now()) / 1000));
+      }
+      return Math.max(0, Number(payment && payment.sisa_waktu_detik || 0));
+    }
+
+    function timeLeftLabel(seconds) {
+      const total = Math.max(0, Number(seconds || 0));
+      if (total <= 0) return 'habis';
+      const hours = Math.floor(total / 3600);
+      const minutes = Math.floor((total % 3600) / 60);
+      if (hours <= 0 && minutes <= 0) return 'kurang dari 1 menit';
+      if (hours <= 0) return `${minutes} menit`;
+      return `${hours} jam ${minutes} menit`;
+    }
+
+    function filterPaymentHistory(payments, filter) {
+      const items = payments || [];
+      if (filter === 'unpaid') return items.filter(paymentCanExpire);
+      if (filter === 'paid') return items.filter(paymentIsPaidHistory);
+      if (filter === 'cancelled') return items.filter(payment => paymentStatus(payment) === 'DIBATALKAN');
+      if (filter === 'rejected') return items.filter(payment => paymentStatus(payment) === 'DITOLAK');
+      return items;
+    }
+
+    function renderHistoryFilters(kind, activeFilter) {
+      const setter = kind === 'admin' ? 'setAdminHistoryFilter' : 'setBorrowerHistoryFilter';
+      const filters = kind === 'admin'
+        ? [['all', 'Semua'], ['paid', 'Sudah bayar'], ['rejected', 'Ditolak'], ['cancelled', 'Dibatalkan']]
+        : [['all', 'Semua'], ['unpaid', 'Belum bayar'], ['paid', 'Sudah bayar'], ['cancelled', 'Dibatalkan']];
+      return `
+        <div class="tabs" aria-label="Filter riwayat pembayaran">
+          ${filters.map(([value, label]) => `
+            <button class="tab ${activeFilter === value ? 'active' : ''}" type="button" onclick="${setter}('${value}')">${label}</button>
+          `).join('')}
+        </div>
+      `;
     }
 
     function toDateTimeLocal(value) {
@@ -1080,6 +1136,10 @@
       if (!payment || !state.paymentDialogOpen) return '';
       const method = payment.method || {};
       const paidClicked = !!payment.tanggal_bayar_diklik;
+      const isCancelled = paymentStatus(payment) === 'DIBATALKAN';
+      const canExpire = paymentCanExpire(payment);
+      const secondsLeft = paymentSecondsLeft(payment);
+      const locallyExpired = canExpire && secondsLeft <= 0;
       return `
         <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="payment-dialog-title">
           <section class="modal-dialog">
@@ -1096,6 +1156,10 @@
             <div class="modal-body stack">
               <div class="notice">
                 <strong>Nominal diajukan: ${money(payment.nominal_diajukan)}</strong>
+                ${canExpire ? `
+                  <div style="margin-top:6px;">Batas bayar: <strong>${escapeHtml(payment.batas_bayar || '-')}</strong></div>
+                  <div>Sisa waktu: <strong>${timeLeftLabel(secondsLeft)}</strong></div>
+                ` : ''}
               </div>
               <div class="item stack">
                 <div class="row between">
@@ -1111,7 +1175,10 @@
                 ${method.qr_image_url ? `<img class="qr-img" src="${escapeHtml(method.qr_image_url)}" alt="QRIS">` : method.jenis === 'QRIS' ? '<div class="empty">URL gambar QRIS belum diisi admin.</div>' : ''}
                 ${method.instruksi ? `<p class="muted">${escapeHtml(method.instruksi)}</p>` : ''}
               </div>
-              ${paidClicked ? `
+              ${isCancelled || locallyExpired ? `
+                <div class="error">Pembayaran dibatalkan sistem karena melewati batas 24 jam tanpa klik Saya Sudah Bayar.</div>
+                <button class="btn red" type="button" disabled>Batas Waktu Habis</button>
+              ` : paidClicked ? `
                 <div class="success">Pembayaran sudah ditandai dibayar. Admin akan mengecek dan mengonfirmasi.</div>
                 <button class="btn green" type="button" disabled>Menunggu Konfirmasi Admin</button>
               ` : `
@@ -1135,16 +1202,22 @@
     }
 
     function renderPaymentHistory(payments) {
+      const filtered = filterPaymentHistory(payments, state.borrowerHistoryFilter);
       return `
         <section class="panel">
-          <div class="panel-head"><h2>Riwayat Pembayaran</h2></div>
-          <div class="panel-body">
+          <div class="panel-head">
+            <h2>Riwayat Pembayaran</h2>
+            <span class="badge">${filtered.length}</span>
+          </div>
+          <div class="panel-body stack">
+            ${renderHistoryFilters('borrower', state.borrowerHistoryFilter)}
             ${payments.length ? `
-              <div class="table-wrap">
+              ${filtered.length ? `<div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
                       <th>Tanggal</th>
+                      <th>Batas bayar</th>
                       <th>Kode</th>
                       <th>Metode</th>
                       <th>Diajukan</th>
@@ -1153,19 +1226,23 @@
                     </tr>
                   </thead>
                   <tbody>
-                    ${payments.map(payment => `
+                    ${filtered.map(payment => `
                       <tr>
                         <td>${escapeHtml(payment.tanggal_submit)}</td>
+                        <td>${escapeHtml(payment.batas_bayar || '-')}</td>
                         <td>${escapeHtml(payment.kode_pembayaran)}</td>
                         <td>${escapeHtml(payment.method && payment.method.nama || '-')}</td>
                         <td>${money(payment.nominal_diajukan)}</td>
                         <td>${payment.nominal_diterima === '' ? '-' : money(payment.nominal_diterima)}</td>
-                        <td>${statusBadge(payment.status)}</td>
+                        <td>
+                          ${statusBadge(payment.status)}
+                          ${payment.catatan_admin ? `<div class="muted" style="margin-top:4px;">${escapeHtml(payment.catatan_admin)}</div>` : ''}
+                        </td>
                       </tr>
                     `).join('')}
                   </tbody>
                 </table>
-              </div>
+              </div>` : '<div class="empty">Tidak ada riwayat untuk filter ini.</div>'}
             ` : '<div class="empty">Belum ada riwayat pembayaran.</div>'}
           </div>
         </section>
@@ -1228,7 +1305,7 @@
     function renderAdminPayments() {
       const payments = state.dashboard.payments;
       const pending = payments.filter(payment => payment.status === 'MENUNGGU' && payment.tanggal_bayar_diklik);
-      const done = payments.filter(payment => payment.status !== 'MENUNGGU').slice(0, 30);
+      const done = filterPaymentHistory(payments.filter(payment => payment.status !== 'MENUNGGU'), state.adminHistoryFilter).slice(0, 30);
       return `
         <section class="panel">
           <div class="panel-head">
@@ -1240,8 +1317,12 @@
           </div>
         </section>
         <section class="panel">
-          <div class="panel-head"><h2>Riwayat Terakhir</h2></div>
-          <div class="panel-body">
+          <div class="panel-head">
+            <h2>Riwayat Terakhir</h2>
+            <span class="badge">${done.length}</span>
+          </div>
+          <div class="panel-body stack">
+            ${renderHistoryFilters('admin', state.adminHistoryFilter)}
             ${renderAdminPaymentTable(done)}
           </div>
         </section>
@@ -1290,6 +1371,7 @@
             <thead>
               <tr>
                 <th>Tanggal</th>
+                <th>Batas bayar</th>
                 <th>Nama</th>
                 <th>Kode</th>
                 <th>Diajukan</th>
@@ -1301,6 +1383,7 @@
               ${payments.map(payment => `
                 <tr>
                   <td>${escapeHtml(payment.tanggal_submit)}</td>
+                  <td>${escapeHtml(payment.batas_bayar || '-')}</td>
                   <td>${escapeHtml(payment.borrower && payment.borrower.nama || '-')}</td>
                   <td>${escapeHtml(payment.kode_pembayaran)}</td>
                   <td>${money(payment.nominal_diajukan)}</td>
@@ -1542,6 +1625,16 @@
       render();
     }
 
+    function setBorrowerHistoryFilter(filter) {
+      state.borrowerHistoryFilter = filter;
+      render();
+    }
+
+    function setAdminHistoryFilter(filter) {
+      state.adminHistoryFilter = filter;
+      render();
+    }
+
     function refreshAdmin() {
       run(async () => {
         state.dashboard = await server('getAdminDashboard', state.adminSession);
@@ -1720,6 +1813,8 @@
 
     function mockCreatePayment(amount, methodId, note) {
       const method = mockDb.methods.find(item => item.method_id === methodId);
+      const submittedAt = new Date();
+      const expiresAt = new Date(submittedAt.getTime() + 24 * 60 * 60 * 1000);
       const payment = {
         payment_id: 'PAY_' + Date.now(),
         peminjam_id: 'BRW_TEST',
@@ -1729,7 +1824,11 @@
         method,
         kode_pembayaran: 'PAY-DEMO-' + Math.floor(Math.random() * 999),
         status: 'MENUNGGU',
-        tanggal_submit: new Date().toLocaleString('id-ID'),
+        tanggal_submit: submittedAt.toLocaleString('id-ID'),
+        tanggal_submit_iso: submittedAt.toISOString(),
+        batas_bayar: expiresAt.toLocaleString('id-ID'),
+        batas_bayar_iso: expiresAt.toISOString(),
+        sisa_waktu_detik: 24 * 60 * 60,
         tanggal_bayar_diklik: '',
         tanggal_konfirmasi: '',
         catatan_peminjam: note || '',
@@ -1824,6 +1923,12 @@
       saveMockDb();
       return mockDashboard();
     }
+
+    window.setInterval(() => {
+      if (state.paymentDialogOpen && state.currentPayment && paymentCanExpire(state.currentPayment)) {
+        render();
+      }
+    }, 60000);
 
     init();
   </script>
