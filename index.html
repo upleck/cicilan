@@ -883,7 +883,8 @@
         : upper === 'DITOLAK' || upper === 'DIBATALKAN'
           ? 'red'
           : 'amber';
-      return `<span class="badge ${cls}">${escapeHtml(upper || '-')}</span>`;
+      const label = upper === 'DIBATALKAN' ? 'KEDALUWARSA' : upper;
+      return `<span class="badge ${cls}">${escapeHtml(label || '-')}</span>`;
     }
 
     function paymentStatus(payment) {
@@ -929,8 +930,8 @@
     function renderHistoryFilters(kind, activeFilter) {
       const setter = kind === 'admin' ? 'setAdminHistoryFilter' : 'setBorrowerHistoryFilter';
       const filters = kind === 'admin'
-        ? [['all', 'Semua'], ['paid', 'Sudah bayar'], ['rejected', 'Ditolak'], ['cancelled', 'Dibatalkan']]
-        : [['all', 'Semua'], ['unpaid', 'Belum bayar'], ['paid', 'Sudah bayar'], ['cancelled', 'Dibatalkan']];
+        ? [['all', 'Semua'], ['paid', 'Sudah bayar'], ['rejected', 'Ditolak'], ['cancelled', 'Kedaluwarsa']]
+        : [['all', 'Semua'], ['unpaid', 'Belum bayar'], ['paid', 'Sudah bayar'], ['cancelled', 'Kedaluwarsa']];
       return `
         <div class="tabs" aria-label="Filter riwayat pembayaran">
           ${filters.map(([value, label]) => `
@@ -1244,7 +1245,7 @@
                 ${method.instruksi ? `<p class="muted">${escapeHtml(method.instruksi)}</p>` : ''}
               </div>
               ${isCancelled || locallyExpired ? `
-                <div class="error">Pembayaran dibatalkan sistem karena melewati batas 24 jam tanpa klik Saya Sudah Bayar.</div>
+                <div class="error">Instruksi pembayaran ini kedaluwarsa karena melewati batas 24 jam tanpa klik Saya Sudah Bayar. Ini bukan penolakan dari admin.</div>
                 <button class="btn red" type="button" disabled>Batas Waktu Habis</button>
               ` : paidClicked ? `
                 <div class="success">Pembayaran sudah ditandai dibayar. Admin akan mengecek dan mengonfirmasi.</div>
